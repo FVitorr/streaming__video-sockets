@@ -4,7 +4,7 @@ import threading
 
 class ServeOn:
     def __init__(self, host='127.0.0.1', tcp_port=12345, udp_port=12346):
-        self.BUFFER_SIZE = 4096
+        self.BUFFER_SIZE = 312
         self.tcp_server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp_server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.tcp_server_socket.bind((host, tcp_port))

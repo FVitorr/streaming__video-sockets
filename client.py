@@ -1,14 +1,21 @@
+import os
 import socket
 import threading
+import subprocess
+import time
 
 class ClientTCP:
     def __init__(self, host='127.0.0.1', tcp_port=12345, udp_port=12346):
-        self.BUFFER_SIZE = 4096
+        self.BUFFER_SIZE = 312
         self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp.settimeout(10)  # Timeout de 10 segundos para a conexão
         
         self.udp_server_address = (host, udp_port)
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        
+        self.frame_count = 0
+        self.start_time = 0
+        self.fps = 0
 
         try:
             self.tcp.connect((host, tcp_port))
@@ -22,19 +29,42 @@ class ClientTCP:
         except Exception as e:
             print(f"[!] Error connecting: {e}")
             self.tcp = None
+    
+    def calculate_fps(self):
+        current_time = time.time() 
+        elapsed_time = current_time - self.start_time
+        if elapsed_time > 1:  # Calcula FPS a cada segundo
+            self.fps = self.frame_count / elapsed_time
+            print(f"Current FPS: {self.fps:.2f}", end='\r')
+            self.start_time = current_time
+            self.frame_count = 0
 
     def receive_file(self):
-        received_data = b""
         try:
             print("[-] Receiving file via TCP...")
+
+            #devnull = open(os.devnull, 'w')
+            #mpv_process = subprocess.Popen(['mpv', '--cache=no', '-'], 
+                                                #stdin=subprocess.PIPE, stdout= devnull)
+
+            devnull = open(os.devnull, 'w')
+            mpv_process = subprocess.Popen(['mpv', '--quiet','--cache=no', '--really-quiet', '-', '--no-terminal'], 
+                                                stdin=subprocess.PIPE)
+
+
+            self.start_time = time.time()
             while True:
                 data = self.tcp.recv(self.BUFFER_SIZE)
                 if not data:
                     break
-                received_data += data
-            with open("received_video_tcp.mp4", "wb") as f:
-                f.write(received_data)
-            print("[*] Video received via TCP saved as 'received_video_tcp.mp4'")     
+                mpv_process.stdin.write(data)
+                self.frame_count += 1
+                self.calculate_fps()  # Chama a função para calcular o FPS a cada frame
+            
+            mpv_process.stdin.close()
+            mpv_process.communicate()  # Espera até que o processo termine
+
+            print("[*] Video streaming to mpv finished.")     
         except Exception as e:
             print(f"[!] Error receiving data: {e}")
 
@@ -51,10 +81,6 @@ class ClientTCP:
                 self.tcp.close()
                 self.udp.close()
                 exit(1)
-                
-            
-
-            
 
             # Solicitar o arquivo ao servidor via TCP
             msg = f"{threading.current_thread().name} TCP true"
@@ -77,7 +103,6 @@ class ClientTCP:
             if self.udp:
                 self.udp.close()
                 print(f"[*] Closing UDP connection")
-            
 
 if __name__ == '__main__':
     num_clients = 1  # Número de clientes que você quer abrir

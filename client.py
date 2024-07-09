@@ -3,10 +3,9 @@ import threading
 
 class ClientTCP:
     def __init__(self, host='127.0.0.1', tcp_port=12345, udp_port=12346):
-        self.SEPARATOR = "<SEPARATOR>"
         self.BUFFER_SIZE = 4096
         self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tcp.settimeout(40)  # Timeout de 10 segundos para a conexão
+        self.tcp.settimeout(10)  # Timeout de 10 segundos para a conexão
         
         self.udp_server_address = (host, udp_port)
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -38,26 +37,30 @@ class ClientTCP:
             print("[*] Video received via TCP saved as 'received_video_tcp.mp4'")     
         except Exception as e:
             print(f"[!] Error receiving data: {e}")
-      
+
     def run(self):
         if not self.tcp:
             print("[!] Connection not established. Exiting.")
             return
         
         try:
-            msg = f"{threading.current_thread().name} UDP true"
-            self.udp.sendto(msg.encode(), self.udp_server_address)
-            print(f"\t[<<] UDP: {msg}")
-            
-            # Enviar uma mensagem ao servidor via TCP
-            msg = f"{threading.current_thread().name} TCP true"
-            self.tcp.sendall(msg.encode())
-            print(f"\t[<<] TCP: {msg}")
-            
             # Receber resposta do servidor via UDP
             udp_response, _ = self.udp.recvfrom(self.BUFFER_SIZE)
-            print(f"[>>] UDP Response: {udp_response.decode()}")
+            print(f"\t[>] UDP Response: {udp_response.decode()}")
+            if udp_response.decode().startswith("File"):
+                self.tcp.close()
+                self.udp.close()
+                exit(1)
+                
             
+
+            
+
+            # Solicitar o arquivo ao servidor via TCP
+            msg = f"{threading.current_thread().name} TCP true"
+            self.tcp.sendall(msg.encode())
+            print(f"\t[<] TCP Request: {msg}")
+
             # Receber o arquivo do servidor via TCP
             self.receive_file()
             
@@ -73,9 +76,8 @@ class ClientTCP:
             
             if self.udp:
                 self.udp.close()
-                print("[*] UDP socket closed.")
+                print(f"[*] Closing UDP connection")
             
-            print("[*] Connection closed.")
 
 if __name__ == '__main__':
     num_clients = 1  # Número de clientes que você quer abrir

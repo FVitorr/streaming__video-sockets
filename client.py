@@ -6,7 +6,7 @@ import time
 
 class ClientTCP:
     def __init__(self, host='127.0.0.1', tcp_port=12345, control_port=12346):
-        self.BUFFER_SIZE = 4096 * 9
+        self.BUFFER_SIZE = 4096 * 3
         self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.tcp.settimeout(30)  # Timeout de 10 segundos para a conexão
 
@@ -73,10 +73,13 @@ class ClientTCP:
                 start_byte = end_byte
                 if size_file > end_byte + self.BUFFER_SIZE:
                     end_byte += self.BUFFER_SIZE
+                elif end_byte == size_file:
+                    print("[*] Video streaming to mpv finished.")    
+                    return
                 else:
                     end_byte += size_file - end_byte
   
-                print(f"[#] Progress ({end_byte* 100 /size_file}%): {end_byte} de {size_file}", end='\r')
+                print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
 
                 self.frame_count += len(data)
                 self.calculate_fps()  # Chama a função para calcular o FPS a cada frame

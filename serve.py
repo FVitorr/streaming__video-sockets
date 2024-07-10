@@ -5,7 +5,7 @@ import time
 
 class ServeOn:
     def __init__(self, host='127.0.0.1', tcp_port=12345, control_port=12346):
-        self.BUFFER_SIZE = 4096 * 9
+        self.BUFFER_SIZE = 4096 * 3
         
         # Cria e configura o socket TCP principal
         self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -22,15 +22,14 @@ class ServeOn:
         print(f"[*] TCP Control Server listening as {host}:{control_port}")
 
         self.tcp_client_sockets = []  # Lista de conexões TCP ativas
-        self.file_path = "/home/vitor/Downloads/picapaubiruta.mp4"
+        self.file_path = "/home/vitor/Downloads/RacionaisMcs.mp4"
 
     def send_video_tcp(self,tcp_socket, control_tcp):
         try:
             # Loop para enviar segmentos do vídeo conforme solicitado pelo cliente
             send_data = 0
-            last_data = ()
             while True:
-                
+                c_request = 0
                 m = f"Ok"
                 while True:
                     request = control_tcp.recv(self.BUFFER_SIZE).decode()
@@ -38,13 +37,20 @@ class ServeOn:
                         m = f"Erro"
                     else:
                         start_byte, end_byte = map(int, request.split())
-                        last_data = (start_byte, end_byte)
                         break
+                    c_request += 1
+                    if c_request > 10:
+                        print("[!]Erro: max request", end='\r')
+                        break
+
                 control_tcp.sendall(m.encode())
+                if c_request > 10:
+                    return
+                
 
                 try:
                     with open(self.file_path, "rb") as f:
-                        print(f"[*] Sending File ({send_data* 100 /self.get_file_size()}%): {send_data}/{self.get_file_size()}",end='\r')
+                        print(f"[*] Sending File ({send_data* 100 /self.get_file_size():.2f}%): {send_data}/{self.get_file_size()}",end='\r')
                         f.seek(start_byte) #Mover ponteiro de leitura
 
                         bytes_to_send = f.read(end_byte - start_byte)

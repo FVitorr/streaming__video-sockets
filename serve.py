@@ -4,15 +4,14 @@ import threading
 import time
 
 class ServeOn:
-    def __init__(self, host='127.0.0.1', tcp_port=12345, control_port=12346):
+    def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
         self.BUFFER_SIZE = 4096 * 3
         
-        # Cria e configura o socket TCP principal
-        self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.tcp.bind((host, tcp_port))
-        self.tcp.listen(5)
-        print(f"[*] TCP Server listening as {host}:{tcp_port}")
+        # Cria e configura o socket UDP principal
+        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_socket.bind((host, udp_port))
+        print(f"[*] UDP Server listening as {host}:{udp_port}")
 
         # Cria e configura o socket TCP adicional
         self.tcp_control = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -22,9 +21,9 @@ class ServeOn:
         print(f"[*] TCP Control Server listening as {host}:{control_port}")
 
         self.tcp_client_sockets = []  # Lista de conexões TCP ativas
-        self.file_path = "/home/vitor/Downloads/RacionaisMcs.mp4"
+        self.file_path = "Bear.mp4"
 
-    def send_video_tcp(self,tcp_socket, control_tcp):
+    def send_video_udp(self,udp_socket, control_tcp, client_address):
         try:
             # Loop para enviar segmentos do vídeo conforme solicitado pelo cliente
             send_data = 0
@@ -54,7 +53,7 @@ class ServeOn:
                         f.seek(start_byte) #Mover ponteiro de leitura
 
                         bytes_to_send = f.read(end_byte - start_byte)
-                        tcp_socket.sendall(bytes_to_send)
+                        self.server_socket.sendto(bytes_to_send, client_address)
 
                         send_data += end_byte - start_byte
                 except Exception as e:
@@ -73,9 +72,9 @@ class ServeOn:
             print(f"[!] File '{self.file_path}' not found.")
             return -1
         
-    def handle_client(self, tcp_socket, control_tcp, client_address, client_control):
+    def handle_client(self, udp_socket, control_tcp, client_address, client_control):
         try:
-            self.tcp_client_sockets.append(tcp_socket)  # Adiciona a nova conexão à lista de clientes TCP ativos
+            self.tcp_client_sockets.append(udp_socket)  # Adiciona a nova conexão à lista de clientes TCP ativos
 
             while True:
                 if self.get_file_size() == -1:
@@ -96,14 +95,14 @@ class ServeOn:
                 print(f"\t[Received TCP from {client_control}]: {msg_tcp.decode()}")
 
                 if msg_tcp.decode().startswith("ClientThread"):
-                    self.send_video_tcp(tcp_socket, control_tcp)
+                    self.send_video_udp(udp_socket, control_tcp, client_address)
                     break
 
         except Exception as e:
             print(f"[!] Error with {client_address} (TCP): {e}")
         finally:
-            self.tcp_client_sockets.remove(tcp_socket)  # Remove a conexão da lista
-            tcp_socket.close()
+            self.tcp_client_sockets.remove(udp_socket)  # Remove a conexão da lista
+            #udp_socket.close()
             control_tcp.close()
             print(f"[*] Closed TCP connection with {client_address}")
 
@@ -112,21 +111,21 @@ class ServeOn:
         try:
             while True:
                 try:
-                    tcp, client_address = self.tcp.accept()
+                    udp, client_address = self.server_socket.recvfrom(self.BUFFER_SIZE)
                     print(f"[+] Accepted TCP connection from {client_address}")
                     control, client_address1 = self.tcp_control.accept()
                     print(f"[+] Accepted TCP connection from {client_address1}")
-                    client_thread = threading.Thread(target=self.handle_client, args=(tcp, control, client_address, client_address1))
+                    client_thread = threading.Thread(target=self.handle_client, args=(udp, control, client_address, client_address1))
                     client_thread.start()
                 except Exception as e:
                     print(f"[!] Error accepting TCP connections: {e}")
         except KeyboardInterrupt:
             print("\n[*] Shutting down TCP server.")
         finally:
-            self.tcp.close()
+            self.server_socket.close()
             self.tcp_control.close()
             print("[*] Server sockets closed.")
 
 if __name__ == '__main__':
-    server = ServeOn(host='127.0.0.1', tcp_port=12345, control_port=12346)
+    server = ServeOn(host='127.0.0.1', udp_port=12345, control_port=12346)
     server.start()

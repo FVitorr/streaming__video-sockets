@@ -5,27 +5,30 @@ import subprocess
 import time
 
 class ClientTCP:
-    def __init__(self, host='127.0.0.1', tcp_port=12345, control_port=12346):
+    def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
         self.BUFFER_SIZE = 4096 * 3
-        self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.tcp.settimeout(30)  # Timeout de 10 segundos para a conexão
 
+        #UDP troca de dados
+        self.udp_server_address = (host, udp_port)
+        self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        #TCP para controle
         self.control_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.control_tcp.settimeout(30)  # Timeout de 10 segundos para a conexão
+        self.control_tcp.settimeout(10)  # Timeout de 10 segundos para a conexão
 
         self.frame_count = 0
         self.start_time = 0
         self.fps = 0
 
         try:
-            self.tcp.connect((host, tcp_port))
-            print(f"[+] Connected to {host}:{tcp_port} TCP")
-            
-            self.control_tcp.connect(('0.tcp.ngrok.io', control_port))
+            self.udp.sendto(b"UDP Connection Request", self.udp_server_address)
+            print(f"[+] Connected to {host}:{udp_port} UDP")
+
+            self.control_tcp.connect((host, control_port))
             print(f"[+] Connected to {host}:{control_port} TCP")
 
         except socket.timeout:
-            print(f"[-] Connection attempt to {host}:{tcp_port} timed out.")
+            print(f"[-] Connection attempt to {host}:{control_port} timed out.")
             self.tcp = None
             self.control_tcp = None
         except Exception as e:
@@ -65,10 +68,10 @@ class ClientTCP:
                         break
 
                 #Receber e processar dados
-                data = self.tcp.recv(self.BUFFER_SIZE)
+                data,_ = self.udp.recvfrom(self.BUFFER_SIZE)
                 if not data:
                     break
-                mpv_process.stdin.write(data) #Escrever no pipe
+                mpv_process.stdin.write(data) #Escrever no pipex
 
                 start_byte = end_byte
                 if size_file > end_byte + self.BUFFER_SIZE:
@@ -92,7 +95,7 @@ class ClientTCP:
             print(f"[!] Error receiving data: {e}")
 
     def run(self):
-        if not self.tcp or not self.control_tcp:
+        if not self.control_tcp:
             print("[!] Connection not established. Exiting.")
             return
         
@@ -111,19 +114,19 @@ class ClientTCP:
             self.control_tcp.sendall(msg.encode())
             print(f"\t[<] TCP Request: {msg}")
 
-            # Receber o arquivo do servidor via TCP
+            # Receber o arquivo do servidor via UDP
             size_file = int(tcp1_response.decode().split()[1])
             self.receive_file(size_file)
             
         except Exception as e:
             print(f"[!] Error during communication: {e}")
         finally:
-            if self.tcp:
-                try:
-                    print(f"[*] Closing TCP connection to {self.tcp.getpeername()}")
-                except Exception as e:
-                    print(f"[!] Error accessing TCP socket info: {e}")
-                self.tcp.close()
+            # if self.tcp:
+            #     try:
+            #         print(f"[*] Closing TCP connection to {self.tcp.getpeername()}")
+            #     except Exception as e:
+            #         print(f"[!] Error accessing TCP socket info: {e}")
+            #     self.tcp.close()
             
             if self.control_tcp:
                 try:
@@ -137,7 +140,7 @@ if __name__ == '__main__':
 
     threads = []
     for i in range(num_clients):
-        thread = threading.Thread(target=ClientTCP('8.tcp.ngrok.io',17149,12053).run, name=f"ClientThread-{i+1}")
+        thread = threading.Thread(target=ClientTCP().run, name=f"ClientThread-{i+1}")
         thread.start()
         threads.append(thread)
 

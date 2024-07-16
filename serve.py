@@ -5,7 +5,7 @@ import time
 
 class ServeOn:
     def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
-        self.BUFFER_SIZE = 4096 * 3
+        self.BUFFER_SIZE = 1000
         
         # Cria e configura o socket UDP principal
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -21,21 +21,21 @@ class ServeOn:
         print(f"[*] TCP Control Server listening as {host}:{control_port}")
 
         self.tcp_client_sockets = []  # Lista de conexões TCP ativas
-        self.file_path = "Bear.mp4"
+        self.file_path = "/home/vitor/Downloads/loop.mp4"
 
     def send_video_udp(self,udp_socket, control_tcp, client_address):
         try:
             # Loop para enviar segmentos do vídeo conforme solicitado pelo cliente
             send_data = 0
+            start_byte = 0
+            end_byte = self.BUFFER_SIZE
             while True:
                 c_request = 0
                 m = f"Ok"
                 while True:
                     request = control_tcp.recv(self.BUFFER_SIZE).decode()
-                    if len(request.split()) != 2:
-                        m = f"Erro"
-                    else:
-                        start_byte, end_byte = map(int, request.split())
+                    print( request.split()[0])
+                    if int(request.split()[0]) == send_data:
                         break
                     c_request += 1
                     if c_request > 10:
@@ -49,13 +49,19 @@ class ServeOn:
 
                 try:
                     with open(self.file_path, "rb") as f:
-                        print(f"[*] Sending File ({send_data* 100 /self.get_file_size():.2f}%): {send_data}/{self.get_file_size()}",end='\r')
+                        #print(f"[*] Sending File ({send_data* 100 /self.get_file_size():.2f}%): {send_data}/{self.get_file_size()}",end='\r')
                         f.seek(start_byte) #Mover ponteiro de leitura
 
                         bytes_to_send = f.read(end_byte - start_byte)
                         self.server_socket.sendto(bytes_to_send, client_address)
 
-                        send_data += end_byte - start_byte
+
+                    send_data += end_byte - start_byte
+                    start_byte = end_byte
+                    if end_byte + self.BUFFER_SIZE < self.get_file_size():
+                        end_byte += self.BUFFER_SIZE
+                    else:
+                        end_byte = self.get_file_size()
                 except Exception as e:
                     print(f"[!] Error sending video chunk: {e}")
                         

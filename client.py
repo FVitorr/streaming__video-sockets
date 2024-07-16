@@ -6,7 +6,7 @@ import time
 
 class ClientTCP:
     def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
-        self.BUFFER_SIZE = 4096 * 3
+        self.BUFFER_SIZE = 1000
 
         #UDP troca de dados
         self.udp_server_address = (host, udp_port)
@@ -19,6 +19,8 @@ class ClientTCP:
         self.frame_count = 0
         self.start_time = 0
         self.fps = 0
+
+        self.msg_control = ''
 
         try:
             self.udp.sendto(b"UDP Connection Request", self.udp_server_address)
@@ -54,14 +56,14 @@ class ClientTCP:
                                                 stdin=subprocess.PIPE)
 
             self.start_time = time.time()
-            start_byte = 0
-            end_byte = self.BUFFER_SIZE
-            while True:
+            end_byte = 0
 
+            while True:
                 while True:
                     #Enviar requisição de inicio e fim arquivo
-                    request = f"{start_byte} {end_byte}"
-                    self.control_tcp.sendall(request.encode())
+                    self.msg_control = f'{end_byte} c c'
+                    self.control_tcp.sendall(self.msg_control.encode())
+
                     #Verificar se esta tudo certo
                     data = self.control_tcp.recv(self.BUFFER_SIZE).decode()
                     if data != "Erro":
@@ -73,22 +75,15 @@ class ClientTCP:
                     break
                 mpv_process.stdin.write(data) #Escrever no pipex
 
-                start_byte = end_byte
-                if size_file > end_byte + self.BUFFER_SIZE:
-                    end_byte += self.BUFFER_SIZE
-                elif end_byte == size_file:
+                if end_byte == size_file:
                     print("[*] Video streaming to mpv finished.")    
                     return
-                else:
-                    end_byte += size_file - end_byte
   
                 print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
 
-                self.frame_count += len(data)
-                self.calculate_fps()  # Chama a função para calcular o FPS a cada frame
+                end_byte += self.BUFFER_SIZE
             
             mpv_process.stdin.close()
-            #mpv_process.communicate()  # Espera até que o processo termine
 
             print("[*] Video streaming to mpv finished.")     
         except Exception as e:

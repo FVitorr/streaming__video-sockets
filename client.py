@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import threading
@@ -20,7 +21,7 @@ class ClientTCP:
         self.start_time = 0
         self.fps = 0
 
-        self.msg_control = ''
+        self.msg_control = {"d":0,"c":0}
 
         try:
             self.udp.sendto(b"UDP Connection Request", self.udp_server_address)
@@ -51,6 +52,11 @@ class ClientTCP:
         try:
             print("[-] Receiving file via TCP...")
 
+            # Iniciar a thread de controle do vídeo
+            thread = threading.Thread(target=self.handle_input)
+            thread.daemon = True  # Tornar a thread daemon para que ela não bloqueie a saída
+            thread.start()
+
             devnull = open(os.devnull, 'w')
             mpv_process = subprocess.Popen(['mpv', '--quiet', '--cache=no', '--really-quiet', '-', '--no-terminal'], 
                                                 stdin=subprocess.PIPE)
@@ -61,8 +67,9 @@ class ClientTCP:
             while True:
                 while True:
                     #Enviar requisição de inicio e fim arquivo
-                    self.msg_control = f'{end_byte} c c'
-                    self.control_tcp.sendall(self.msg_control.encode())
+                    self.msg_control['d'] = end_byte
+                    msg = json.dumps(self.msg_control).encode("utf-8")
+                    self.control_tcp.sendall(msg)
 
                     #Verificar se esta tudo certo
                     data = self.control_tcp.recv(self.BUFFER_SIZE).decode()
@@ -73,21 +80,36 @@ class ClientTCP:
                 data,_ = self.udp.recvfrom(self.BUFFER_SIZE)
                 if not data:
                     break
-                mpv_process.stdin.write(data) #Escrever no pipex
+                mpv_process.stdin.write(data) #Escrever no pipe
 
                 if end_byte == size_file:
-                    print("[*] Video streaming to mpv finished.")    
+                    print("[*] Video streaming to mpv finished.")
+                    #Sinalizar fim do arquivo, -> Msg não esta sendo recebida pelo servidor
+                    self.msg_control = f'{-1} c c'
+                    self.control_tcp.sendall(self.msg_control.encode())
                     return
   
-                print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
+                #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
 
-                end_byte += self.BUFFER_SIZE
+                if size_file > end_byte + self.BUFFER_SIZE:
+                    end_byte += self.BUFFER_SIZE
+                else:
+                    end_byte = size_file
             
             mpv_process.stdin.close()
 
             print("[*] Video streaming to mpv finished.")     
         except Exception as e:
             print(f"[!] Error receiving data: {e}")
+
+    def handle_input(self):
+        comand = ["Pause", "Play", "Voltar", "Avançar", "Stop"]
+        print("[1 = Pause 2 = Play 3 = Voltar 4 = Avançar 5 = Stop]\n >>")
+        while True:
+            entry = int(input())
+
+            if entry > 0 and entry < 6:
+                self.msg_control['c'] = comand[entry -1]
 
     def run(self):
         if not self.control_tcp:

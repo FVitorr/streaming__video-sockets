@@ -1,3 +1,4 @@
+import json
 import os
 import socket
 import threading
@@ -21,7 +22,7 @@ class ServeOn:
         print(f"[*] TCP Control Server listening as {host}:{control_port}")
 
         self.tcp_client_sockets = []  # Lista de conexões TCP ativas
-        self.file_path = "/home/vitor/Downloads/loop.mp4"
+        self.file_path = "/home/vitor/Downloads/picapaubiruta.mp4"
 
     def send_video_udp(self,udp_socket, control_tcp, client_address):
         try:
@@ -34,7 +35,7 @@ class ServeOn:
                 m = f"Ok"
                 while True:
                     request = control_tcp.recv(self.BUFFER_SIZE).decode()
-                    print( request.split()[0])
+                    print( request.split()[0],send_data,request)
                     if int(request.split()[0]) == send_data:
                         break
                     c_request += 1
@@ -69,6 +70,45 @@ class ServeOn:
             print(f"[!] Error sending file '{self.file_path}': {e}")
         finally:
             print(f"[*] File '{self.file_path}' sent successfully.")
+    def send_video_(self,udp_socket, control_tcp, client_address):
+        # Loop para enviar segmentos do vídeo conforme solicitado pelo cliente
+        send_data = 0
+        start_byte = 0
+        end_byte = self.BUFFER_SIZE
+        while True:
+            c_request = 0
+            m = f"Ok"
+            while True:
+                request = control_tcp.recv(self.BUFFER_SIZE)
+                data = json.loads(request.decode('utf-8'))
+                print( data['d'],send_data,data)
+                if data:
+                    if int(data['d']) == send_data:
+                        break
+                if c_request > 10:
+                    print("[!]Erro: max request")
+                    break
+                c_request += 1
+
+            control_tcp.sendall(m.encode())
+            if c_request > 10:
+                return
+            
+            with open(self.file_path, "rb") as f:
+                    #print(f"[*] Sending File ({send_data* 100 /self.get_file_size():.2f}%): {send_data}/{self.get_file_size()}",end='\r')
+                    f.seek(start_byte) #Mover ponteiro de leitura
+
+                    bytes_to_send = f.read(end_byte - start_byte)
+                    self.server_socket.sendto(bytes_to_send, client_address)
+
+
+            send_data += end_byte - start_byte
+            start_byte = end_byte
+            if end_byte + self.BUFFER_SIZE < self.get_file_size():
+                end_byte += self.BUFFER_SIZE
+            else:
+                end_byte = self.get_file_size()
+ 
 
     def get_file_size(self):
         try:
@@ -101,7 +141,7 @@ class ServeOn:
                 print(f"\t[Received TCP from {client_control}]: {msg_tcp.decode()}")
 
                 if msg_tcp.decode().startswith("ClientThread"):
-                    self.send_video_udp(udp_socket, control_tcp, client_address)
+                    self.send_video_(udp_socket, control_tcp, client_address)
                     break
 
         except Exception as e:

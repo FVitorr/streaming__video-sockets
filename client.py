@@ -47,6 +47,17 @@ class ClientTCP:
             #print(f"Current FPS: {self.fps:.2f}", end='\r')
             self.start_time = current_time
             self.frame_count = 0
+    
+    def pause_control(self, mpv_process):
+        if self.msg_control['c'] == "Pause":
+            mpv_process.stdin.write(b'{ "command": ["set_property", "pause", true] }\n')
+            mpv_process.stdin.flush()
+            while True:
+                if self.msg_control['c'] == "Play":
+                    mpv_process.stdin.write(b'{ "command": ["set_property", "pause", false] }\n')
+                    mpv_process.stdin.flush()
+                    break
+                time.sleep(0.5)
 
     def receive_file(self,size_file : int):
         try:
@@ -65,12 +76,14 @@ class ClientTCP:
             end_byte = 0
 
             while True:
+                self.pause_control(mpv_process)
                 while True:
                     #Enviar requisição de inicio e fim arquivo
                     self.msg_control['d'] = end_byte
+
                     msg = json.dumps(self.msg_control).encode("utf-8")
                     self.control_tcp.sendall(msg)
-
+                    
                     #Verificar se esta tudo certo
                     data = self.control_tcp.recv(self.BUFFER_SIZE).decode()
                     if data != "Erro":

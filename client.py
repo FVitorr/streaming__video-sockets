@@ -21,7 +21,7 @@ class ClientTCP:
         self.start_time = 0
         self.fps = 0
 
-        self.msg_control = {"d":0,"c":0}
+        self.msg_control = {"d":(0,self.BUFFER_SIZE),"c":"Play"}
 
         try:
             self.udp.sendto(b"UDP Connection Request", self.udp_server_address)
@@ -48,46 +48,47 @@ class ClientTCP:
             self.start_time = current_time
             self.frame_count = 0
     
-    def pause_control(self, mpv_process):
-        if self.msg_control['c'] == "Pause":
-            mpv_process.stdin.write(b'{ "command": ["set_property", "pause", true] }\n')
-            mpv_process.stdin.flush()
-            while True:
-                if self.msg_control['c'] == "Play":
-                    mpv_process.stdin.write(b'{ "command": ["set_property", "pause", false] }\n')
-                    mpv_process.stdin.flush()
-                    break
-                time.sleep(0.5)
 
-    def receive_file(self,size_file : int):
+    def receive_file(self,size_file : int,sec_bytes):
         try:
             print("[-] Receiving file via TCP...")
 
-            # Iniciar a thread de controle do vídeo
+            devnull = open(os.devnull, 'w')
+            mpv_process = subprocess.Popen(['mpv', '--quiet', '--cache=no', '--really-quiet', '-', '--no-terminal'], stdin=subprocess.PIPE
+                                           ,stderr=devnull)
+
+            #Iniciar a thread de controle do vídeo
             thread = threading.Thread(target=self.handle_input)
-            thread.daemon = True  # Tornar a thread daemon para que ela não bloqueie a saída
+            thread.daemon = True  #Tornar a thread daemon para que ela não bloqueie a saída
             thread.start()
 
-            devnull = open(os.devnull, 'w')
-            mpv_process = subprocess.Popen(['mpv', '--quiet', '--cache=no', '--really-quiet', '-', '--no-terminal'], 
-                                                stdin=subprocess.PIPE)
 
             self.start_time = time.time()
-            end_byte = 0
+            end_byte = self.BUFFER_SIZE
+            start_byte = 0
 
             while True:
-                self.pause_control(mpv_process)
                 while True:
                     #Enviar requisição de inicio e fim arquivo
-                    self.msg_control['d'] = end_byte
+                    if self.msg_control['c'] == 'Avancar':
+                        start_byte += (int(sec_bytes) * 10)
+                        end_byte += (int(sec_bytes) * 10)
+
+                    self.msg_control['d'] = (start_byte,end_byte)
 
                     msg = json.dumps(self.msg_control).encode("utf-8")
                     self.control_tcp.sendall(msg)
                     
+                    
+                    print(self.msg_control,end='\r')
+                    if self.msg_control['c'] in ('Avancar','Voltar'):self.msg_control['c'] = "Play"
                     #Verificar se esta tudo certo
-                    data = self.control_tcp.recv(self.BUFFER_SIZE).decode()
-                    if data != "Erro":
-                        break
+                    if self.msg_control['c'] != "Pause":
+                        data = self.control_tcp.recv(self.BUFFER_SIZE).decode()
+                        if data != "Erro":
+                            break
+                    else:
+                        time.sleep(0.5)
 
                 #Receber e processar dados
                 data,_ = self.udp.recvfrom(self.BUFFER_SIZE)
@@ -103,8 +104,8 @@ class ClientTCP:
                     return
   
                 #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
-
-                if size_file > end_byte + self.BUFFER_SIZE:
+                start_byte = end_byte
+                if end_byte + self.BUFFER_SIZE < size_file:
                     end_byte += self.BUFFER_SIZE
                 else:
                     end_byte = size_file
@@ -116,14 +117,13 @@ class ClientTCP:
             print(f"[!] Error receiving data: {e}")
 
     def handle_input(self):
-        comand = ["Pause", "Play", "Voltar", "Avançar", "Stop"]
+        comand = ["Pause", "Play", "Voltar", "Avancar", "Stop"]
         print("[1 = Pause 2 = Play 3 = Voltar 4 = Avançar 5 = Stop]\n >>")
         while True:
             entry = int(input())
-
             if entry > 0 and entry < 6:
                 self.msg_control['c'] = comand[entry -1]
-
+                
     def run(self):
         if not self.control_tcp:
             print("[!] Connection not established. Exiting.")
@@ -133,11 +133,8 @@ class ClientTCP:
             print("[..] MSG")
             # Receber resposta do servidor via segundo socket TCP
             tcp1_response = self.control_tcp.recv(self.BUFFER_SIZE)
-            print(f"\t[>] TCP Response: {tcp1_response.decode()}")
-            if tcp1_response.decode().startswith("File"):
-                self.tcp.close()
-                self.control_tcp.close()
-                exit(1)
+            data = json.loads(tcp1_response.decode('utf-8'))
+            print(f"\t[>] TCP Response: {data}")
 
             # Solicitar o arquivo ao servidor via TCP
             msg = f"{threading.current_thread().name} TCP true"
@@ -145,8 +142,7 @@ class ClientTCP:
             print(f"\t[<] TCP Request: {msg}")
 
             # Receber o arquivo do servidor via UDP
-            size_file = int(tcp1_response.decode().split()[1])
-            self.receive_file(size_file)
+            self.receive_file(data['size_file'],data['sec_byte'])
             
         except Exception as e:
             print(f"[!] Error during communication: {e}")

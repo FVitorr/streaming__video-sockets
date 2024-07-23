@@ -1,9 +1,12 @@
+import base64
 import json
 import os
 import socket
 import threading
 import time
 from moviepy.editor import VideoFileClip
+import struct
+
 
 class ServeOn:
     def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
@@ -11,7 +14,7 @@ class ServeOn:
         
         # Cria e configura o socket UDP principal
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, self.BUFFER_SIZE)
         self.server_socket.bind((host, udp_port))
         print(f"[*] UDP Server listening as {host}:{udp_port}")
 
@@ -30,6 +33,7 @@ class ServeOn:
         send_data = 0
         start_byte = 0
         end_byte = 0
+        index = 0
         while True:
             c_request = {"isCount": True, "c_request": 0}
             m = f"Ok"
@@ -41,18 +45,10 @@ class ServeOn:
                     print(f"[!] Error decoding JSON: {data}")
                     c_request["c_request"] += 1
 
-                print(data, end="\r")
+                #print(data, end="\r")
                 if data:
                     if data['c'] == "Play": 
                         start_byte,end_byte = data['d']
-                        break
-                    if data['c'] == "Pause":
-                        c_request["isCount"] = False
-                    if data['c'] == "Voltar": #Voltar 10s
-                        sec_bytes = float(self.get_file_size()) / self.get_video_duration()['seconds']
-                    if data['c'] == "Avancar":#Avançar 10s 
-                        start_byte,end_byte = data['d']
-                        print("\n",data['d'])
                         break
 
                 if 10 < int(c_request["c_request"]):
@@ -64,15 +60,26 @@ class ServeOn:
             control_tcp.sendall(m.encode())
             if c_request["c_request"] > 10:
                 return
-            
+            data_send = {}
             with open(self.file_path, "rb") as f:
                     #print(f"[*] Sending File ({send_data* 100 /self.get_file_size():.2f}%): {send_data}/{self.get_file_size()}",end='\r')
                     f.seek(start_byte) #Mover ponteiro de leitura
 
                     bytes_to_send = f.read(end_byte - start_byte)
-                    self.server_socket.sendto(bytes_to_send, client_address)
+                    encoded = base64.b64encode(bytes_to_send)
+                    
+                    data_send['i'] = index
+                    data_send['data'] = encoded.decode('ascii')
+                    
 
-        
+                    data = json.dumps(data_send).encode('utf-8')
+                    
+                    # Log para verificar os dados antes do envio
+                    print(f"Sending packet with index {index}, size: {len(bytes_to_send)} bytes")
+                    print(f"Data preview (first 50 bytes): {bytes_to_send[:50]}...")  # Log dos primeiros bytes do pacote
+                    
+                    self.server_socket.sendto(data, client_address)
+                    index += 1
 
     def get_file_size(self):
         try:

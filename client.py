@@ -2,27 +2,23 @@ import base64
 import json
 import os
 import socket
-import struct
 import threading
 import subprocess
 import time
 
 class ClientTCP:
+
     def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
         self.BUFFER_SIZE = 3000
 
-        #UDP troca de dados
+        # UDP troca de dados
         self.udp_server_address = (host, udp_port)
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.BUFFER_SIZE)
 
-        #TCP para controle
+        # TCP para controle
         self.control_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.control_tcp.settimeout(10)  # Timeout de 10 segundos para a conexão
-
-        self.frame_count = 0
-        self.start_time = 0
-        self.fps = 0
+        self.control_tcp.settimeout(10)  # timeout de 10 segundos para conexao
 
         self.msg_control = {"d":(0,self.BUFFER_SIZE),"c":"Play"}
 
@@ -41,34 +37,24 @@ class ClientTCP:
             print(f"[!] Error connecting: {e}")
             self.tcp = None
             self.control_tcp = None
-    
-    def calculate_fps(self):
-        current_time = time.time() 
-        elapsed_time = current_time - self.start_time
-        if elapsed_time > 1:  # Calcula FPS a cada segundo
-            self.fps = self.frame_count / elapsed_time
-            #print(f"Current FPS: {self.fps:.2f}", end='\r')
-            self.start_time = current_time
-            self.frame_count = 0
-    
 
-    def receive_file(self,size_file : int,sec_bytes):
+#---------------------------------------------------------------------------------------------------
+
+    def receive_file(self,size_file : int):
         try:
             print("[-] Receiving file via TCP...")
 
-            # Redirecionar stderr para /dev/null
             devnull = open(os.devnull, 'w')
             mpv_process = subprocess.Popen(
-                ['mpv', '--quiet', '--really-quiet', '--no-audio', '-'],
+                ['mpv', '--quiet', '--really-quiet', '--no-audio', '--no-cache', '-'],
                 stdin=subprocess.PIPE,
                 stderr=devnull
             )
 
-            #Iniciar a thread de controle do vídeo
+            # thread de controle do vídeo
             thread = threading.Thread(target=self.handle_input, args= [mpv_process])
-            thread.daemon = True  #Tornar a thread daemon para que ela não bloqueie a saída
+            thread.daemon = True  # tornar a thread daemon para que ela nao bloqueie a saida
             thread.start()
-
 
             self.start_time = time.time()
             end_byte = self.BUFFER_SIZE
@@ -76,6 +62,7 @@ class ClientTCP:
 
             buffer_ = []
             buffer_ordenado = []
+            count = 5
 
             while True:
                 while True:
@@ -103,39 +90,39 @@ class ClientTCP:
                 data_response = json.loads(data.decode('utf-8'))
                 data_response['data'] = base64.b64decode(data_response['data'])
                 buffer_.append(data_response)
+                if len(buffer_) >= count or end_byte == size_file:
+                    bytes_ = 5
+                    if end_byte == size_file:
+                        bytes_ = len(buffer_) - (count - 5) 
 
-                if end_byte == size_file:
-                    n = b''
-                    buffer_ordenado = sorted(buffer_, key=lambda x: x["i"])
+                    buffer_ordenado = sorted(buffer_[-bytes_:], key=lambda x: x["i"])    
+                    count += 5
+                    
+                    print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                     
                     for i in buffer_ordenado:
-                        n += i['data']
-                   
-                    mpv_process.stdin.write(n)
-                    mpv_process.stdin.flush()
+                        mpv_process.stdin.write(i['data'])
+                        mpv_process.stdin.flush()
 
-                    print("[*] Video streaming to mpv finished.")
-                    #Sinalizar fim do arquivo, -> Msg não esta sendo recebida pelo servidor
+                if end_byte == size_file:
+                    print("\n[*] Video streaming to mpv finished.")
                     self.msg_control = f'{-1} c c'
                     self.control_tcp.sendall(self.msg_control.encode())
                     break
   
-                #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                 start_byte = end_byte
                 if end_byte + self.BUFFER_SIZE < size_file:
                     end_byte += self.BUFFER_SIZE
                 else:
                     end_byte = size_file
-            while(1):
-                time.sleep(100)
+
             mpv_process.stdin.close()
             mpv_process.terminate() 
         except Exception as e:
             print(f"[!] Error receiving data: {e}")
 
-
+#---------------------------------------------------------------------------------------------------
             
-
     def handle_input(self, mpv_process):
         comand = ["Pause", "Play", "Voltar", "Avancar", "Stop"]
         print("[1 = Pause 2 = Play 3 = Voltar 4 = Avançar 5 = Stop]\n >>")
@@ -157,6 +144,8 @@ class ClientTCP:
                 if mpv_process.stdin:
                     mpv_process.stdin.write((command + '\n').encode('utf-8'))
                     mpv_process.stdin.flush()
+
+#--------------------------------------------------------------------------------------------------- 
                 
     def run(self):
         if not self.control_tcp:
@@ -171,41 +160,28 @@ class ClientTCP:
             print(f"\t[>] TCP Response: {data}")
 
             # Solicitar o arquivo ao servidor via TCP
-            msg = f"{threading.current_thread().name} TCP true"
+            msg = f"ClientThread TCP true"
             self.control_tcp.sendall(msg.encode())
             print(f"\t[<] TCP Request: {msg}")
 
             # Receber o arquivo do servidor via UDP
-            self.receive_file(data['size_file'],data['sec_byte'])
+            self.receive_file(data['size_file'])
             
         except Exception as e:
             print(f"[!] Error during communication: {e}")
-        finally:
-            # if self.tcp:
-            #     try:
-            #         print(f"[*] Closing TCP connection to {self.tcp.getpeername()}")
-            #     except Exception as e:
-            #         print(f"[!] Error accessing TCP socket info: {e}")
-            #     self.tcp.close()
-            
-            #if self.control_tcp:
-                #try:
-                    #print(f"[*] Closing TCP connection to {self.control_tcp.getpeername()}")
-                #except Exception as e:
-                    #print(f"[!] Error accessing TCP socket info: {e}")
-                #self.control_tcp.close()
+        finally:            
+            if self.control_tcp:
+                try:
+                    print(f"[*] Closing TCP connection to {self.control_tcp.getpeername()}")
+                except Exception as e:
+                    print(f"[!] Error accessing TCP socket info: {e}")
+                self.control_tcp.close()
             pass
 
+
 if __name__ == '__main__':
-    num_clients = 1  # Número de clientes que você quer abrir
-
-    threads = []
-    for i in range(num_clients):
-        thread = threading.Thread(target=ClientTCP().run, name=f"ClientThread-{i+1}")
-        thread.start()
-        threads.append(thread)
-
-    for thread in threads:
-        thread.join()  # Esperar todas as threads terminarem
+    num_clients = 1
+    client = ClientTCP()
+    client.run()
 
     print("All client threads have finished.")

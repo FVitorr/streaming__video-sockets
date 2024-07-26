@@ -9,7 +9,8 @@ import time
 
 class ClientTCP:
     def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
-        self.BUFFER_SIZE = 3000
+        self.BUFFER_SIZE = 1464
+        self.SLEEP_TIME = 0.5
 
         #UDP troca de dados
         self.udp_server_address = (host, udp_port)
@@ -41,25 +42,18 @@ class ClientTCP:
             print(f"[!] Error connecting: {e}")
             self.tcp = None
             self.control_tcp = None
-    
-    def calculate_fps(self):
-        current_time = time.time() 
-        elapsed_time = current_time - self.start_time
-        if elapsed_time > 1:  # Calcula FPS a cada segundo
-            self.fps = self.frame_count / elapsed_time
-            #print(f"Current FPS: {self.fps:.2f}", end='\r')
-            self.start_time = current_time
-            self.frame_count = 0
-    
 
-    def receive_file(self,size_file : int,sec_bytes):
+#---------------------------------------------------------------------------------------------------
+
+    def receive_file(self,size_file : int, bit_rate: int):
         try:
             print("[-] Receiving file via TCP...")
 
-            # Redirecionar stderr para /dev/null
+            self.BUFFER_SIZE = int(bit_rate) * 2
+            print(f"[*] Buffer size: {self.BUFFER_SIZE}")
             devnull = open(os.devnull, 'w')
             mpv_process = subprocess.Popen(
-                ['mpv', '--quiet', '--really-quiet', '--no-audio', '-'],
+                ['mpv', '-cache=no', '--demuxer-thread=no', '--no-audio', '-'],
                 stdin=subprocess.PIPE,
                 stderr=devnull
             )
@@ -71,12 +65,13 @@ class ClientTCP:
 
 
             self.start_time = time.time()
-            end_byte = self.BUFFER_SIZE
+            end_byte = 1464
             start_byte = 0
 
             buffer_ = []
             buffer_ordenado = []
-
+            count = 5
+            bytes_recebidos = 0
             while True:
                 while True:
                     #Enviar requisição de inicio e fim arquivo
@@ -84,7 +79,6 @@ class ClientTCP:
 
                     msg = json.dumps(self.msg_control).encode("utf-8")
                     self.control_tcp.sendall(msg)
-                    
                     
                     #print(self.msg_control,end='\r')
                     if self.msg_control['c'] in ('Avancar','Voltar'):self.msg_control['c'] = "Play"
@@ -97,22 +91,26 @@ class ClientTCP:
                         time.sleep(0.5)
 
                 #Receber e processar dados
-                data,_ = self.udp.recvfrom(5000)
+                data,_ = self.udp.recvfrom(self.BUFFER_SIZE)
                 if not data:
                     break
+                
                 data_response = json.loads(data.decode('utf-8'))
                 data_response['data'] = base64.b64decode(data_response['data'])
+                bytes_recebidos += len(data_response['data'])
                 buffer_.append(data_response)
-
-                if end_byte == size_file:
-                    n = b''
-                    buffer_ordenado = sorted(buffer_, key=lambda x: x["i"])
+                if bytes_recebidos >= self.BUFFER_SIZE or end_byte == size_file: 
+                    buffer_ = sorted(buffer_, key = lambda x: x['i']) 
                     
-                    for i in buffer_ordenado:
-                        n += i['data']
-                   
-                    mpv_process.stdin.write(n)
-                    mpv_process.stdin.flush()
+                    print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
+                    
+                    time.sleep(self.SLEEP_TIME/2)
+                    for i in buffer_:
+                        mpv_process.stdin.write(i['data'])
+                        mpv_process.stdin.flush()
+                    
+                    buffer_ = []
+                    bytes_recebidos = 0
 
                     print("[*] Video streaming to mpv finished.")
                     #Sinalizar fim do arquivo, -> Msg não esta sendo recebida pelo servidor
@@ -122,8 +120,8 @@ class ClientTCP:
   
                 #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                 start_byte = end_byte
-                if end_byte + self.BUFFER_SIZE < size_file:
-                    end_byte += self.BUFFER_SIZE
+                if end_byte + 1464 < size_file:
+                    end_byte += 1464
                 else:
                     end_byte = size_file
             while(1):
@@ -176,7 +174,7 @@ class ClientTCP:
             print(f"\t[<] TCP Request: {msg}")
 
             # Receber o arquivo do servidor via UDP
-            self.receive_file(data['size_file'],data['sec_byte'])
+            self.receive_file(data['size_file'], data['bit_rate'])
             
         except Exception as e:
             print(f"[!] Error during communication: {e}")

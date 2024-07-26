@@ -2,7 +2,6 @@ import base64
 import json
 import os
 import socket
-import struct
 import threading
 import subprocess
 import time
@@ -49,17 +48,18 @@ class ClientTCP:
         try:
             print("[-] Receiving file via TCP...")
 
-            self.BUFFER_SIZE = int(bit_rate) * 2
-            print(f"[*] Buffer size: {self.BUFFER_SIZE}")
+            buffer_size_video = int(bit_rate) * 2
+            print(f"[*] Buffer size: {buffer_size_video}")
+
             devnull = open(os.devnull, 'w')
             mpv_process = subprocess.Popen(
-                ['mpv', '-cache=no', '--demuxer-thread=no', '--no-audio', '-'],
+                ['mpv', '-cache=no', '--demuxer-thread=no', '--no-audio','--no-terminal', '-'],
                 stdin=subprocess.PIPE,
                 stderr=devnull
             )
 
             #Iniciar a thread de controle do vídeo
-            thread = threading.Thread(target=self.handle_input, args= [mpv_process])
+            thread = threading.Thread(target=self.handle_input)
             thread.daemon = True  #Tornar a thread daemon para que ela não bloqueie a saída
             thread.start()
 
@@ -69,9 +69,8 @@ class ClientTCP:
             start_byte = 0
 
             buffer_ = []
-            buffer_ordenado = []
-            count = 5
             bytes_recebidos = 0
+
             while True:
                 while True:
                     #Enviar requisição de inicio e fim arquivo
@@ -91,7 +90,7 @@ class ClientTCP:
                         time.sleep(0.5)
 
                 #Receber e processar dados
-                data,_ = self.udp.recvfrom(self.BUFFER_SIZE)
+                data,_ = self.udp.recvfrom(self.BUFFER_SIZE * 2)
                 if not data:
                     break
                 
@@ -99,23 +98,27 @@ class ClientTCP:
                 data_response['data'] = base64.b64decode(data_response['data'])
                 bytes_recebidos += len(data_response['data'])
                 buffer_.append(data_response)
-                if bytes_recebidos >= self.BUFFER_SIZE or end_byte == size_file: 
+
+                print(f"Bytes Recebidos: {bytes_recebidos} tam buffer: {len(buffer_)}", end = '\n')
+                if bytes_recebidos >= buffer_size_video or end_byte == size_file: 
                     buffer_ = sorted(buffer_, key = lambda x: x['i']) 
                     
-                    print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
+                    #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                     
-                    time.sleep(self.SLEEP_TIME/2)
                     for i in buffer_:
                         mpv_process.stdin.write(i['data'])
                         mpv_process.stdin.flush()
                     
                     buffer_ = []
                     bytes_recebidos = 0
+                    time.sleep(self.SLEEP_TIME)
 
+                if end_byte == size_file:
                     print("[*] Video streaming to mpv finished.")
                     #Sinalizar fim do arquivo, -> Msg não esta sendo recebida pelo servidor
-                    self.msg_control = f'{-1} c c'
-                    self.control_tcp.sendall(self.msg_control.encode())
+                    self.msg_control['d'] = [-1,-1]
+                    msg = json.dumps(self.msg_control).encode("utf-8")
+                    self.control_tcp.sendall(msg)
                     break
   
                 #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
@@ -124,38 +127,27 @@ class ClientTCP:
                     end_byte += 1464
                 else:
                     end_byte = size_file
-            while(1):
-                time.sleep(100)
-            mpv_process.stdin.close()
+
             mpv_process.terminate() 
+
         except Exception as e:
             print(f"[!] Error receiving data: {e}")
 
 
             
 
-    def handle_input(self, mpv_process):
+    def handle_input(self):
         comand = ["Pause", "Play", "Voltar", "Avancar", "Stop"]
         print("[1 = Pause 2 = Play 3 = Voltar 4 = Avançar 5 = Stop]\n >>")
+        entry = 1
         while True:
-            entry = int(input())
+            try:
+                entry = int(input())
+            except:
+                pass
             if entry > 0 and entry < 6:
-                #self.msg_control['c'] = comand[entry -1]
-                if entry == 0:
-                    command = "pause"
-                if entry == 1:
-                    command = "cycle pause"
-                elif entry == 2:
-                    command = "seek -10"
-                elif entry == 3:
-                    command = "seek 10"
-                elif entry == 4:
-                    command = "stop"
+                self.msg_control['c'] = comand[entry -1]
 
-                if mpv_process.stdin:
-                    mpv_process.stdin.write((command + '\n').encode('utf-8'))
-                    mpv_process.stdin.flush()
-                
     def run(self):
         if not self.control_tcp:
             print("[!] Connection not established. Exiting.")

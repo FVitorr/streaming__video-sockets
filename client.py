@@ -7,9 +7,9 @@ import subprocess
 import time
 
 class ClientTCP:
-    def __init__(self, host='127.0.0.1', udp_port=12345, control_port=12346):
+    def __init__(self, host='37.218.244.251', udp_port=12345, control_port=12346):
         self.BUFFER_SIZE = 1464
-        self.SLEEP_TIME = 0.5
+        self.SLEEP_TIME = 1
 
         #UDP troca de dados
         self.udp_server_address = (host, udp_port)
@@ -63,8 +63,6 @@ class ClientTCP:
             thread.daemon = True  #Tornar a thread daemon para que ela não bloqueie a saída
             thread.start()
 
-
-            self.start_time = time.time()
             end_byte = 1464
             start_byte = 0
 
@@ -72,6 +70,7 @@ class ClientTCP:
             bytes_recebidos = 0
 
             while True:
+                start_time = time.time()
                 while True:
                     #Enviar requisição de inicio e fim arquivo
                     self.msg_control['d'] = (start_byte,end_byte)

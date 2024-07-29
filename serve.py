@@ -23,8 +23,9 @@ class ServeOn:
         print(f"[*] TCP Control Server listening as {host}:{control_port}")
 
         self.tcp_client_sockets = []  # Lista de conexões TCP ativas
-        self.file_path = "Wildlife.mp4"
+        #self.file_path = "Wildlife.mp4"
         #self.file_path = "BigBuckBunny_640x360.m4v"
+        self.file_path = "video.mp4"
 
 #---------------------------------------------------------------------------------------------------
 
@@ -47,7 +48,6 @@ class ServeOn:
                     print(f"[!] Error decoding JSON: {recive_cliente}")
                     c_request["c_request"] += 1
 
-                #print(control_data, end="\n")
 
                 if control_data:
                     if control_data['c'] == 'Play':

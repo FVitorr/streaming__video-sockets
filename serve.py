@@ -55,6 +55,10 @@ class ServeOn:
                         break
                     if control_data['c'] == 'Pause':
                         c_request["isCount"] = False
+                    if control_data['c'] == 'Stop':
+                        print("[*] Stop video")
+                        control_tcp.close()
+                        break
 
                 if 10 < int(c_request["c_request"]):
                     print("[!]Erro: max request")

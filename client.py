@@ -7,9 +7,9 @@ import subprocess
 import time
 
 class ClientTCP:
-    def __init__(self, host='37.218.244.251', udp_port=12345, control_port=12346):
+    def __init__(self, host='192.168.0.112', udp_port=12345, control_port=12346):
         self.BUFFER_SIZE = 1464
-        self.SLEEP_TIME = 1
+        self.SLEEP_TIME = 0.5
 
         #UDP troca de dados
         self.udp_server_address = (host, udp_port)
@@ -50,25 +50,24 @@ class ClientTCP:
 
             buffer_size_video = int(bit_rate) * 2
             print(f"[*] Buffer size: {buffer_size_video}")
+            vlc_path = r"C:\Program Files\VideoLAN\VLC\vlc.exe"
 
             devnull = open(os.devnull, 'w')
-            mpv_process = subprocess.Popen(
-                ['mpv', '-cache=no', '--demuxer-thread=no', '--no-audio','--no-terminal', '-'],
-                stdin=subprocess.PIPE,
-                stderr=devnull
-            )
+            vlc_process = subprocess.Popen([vlc_path, '-', '--input-title-format', 'Streaming Video',
+                                    '--network-caching=0', '--file-caching=0'],
+                                    stdin=subprocess.PIPE)
 
             #Iniciar a thread de controle do vídeo
             thread = threading.Thread(target=self.handle_input)
             thread.daemon = True  #Tornar a thread daemon para que ela não bloqueie a saída
             thread.start()
 
-            end_byte = 1464
+            end_byte = self.BUFFER_SIZE
             start_byte = 0
 
             buffer_ = []
             bytes_recebidos = 0
-
+            first_run = True
             while True:
                 start_time = time.time()
                 while True:
@@ -98,15 +97,14 @@ class ClientTCP:
                 bytes_recebidos += len(data_response['data'])
                 buffer_.append(data_response)
 
-                print(f"Bytes Recebidos: {bytes_recebidos} tam buffer: {len(buffer_)}", end = '\n')
-                if bytes_recebidos >= buffer_size_video or end_byte == size_file: 
+                if (bytes_recebidos >= buffer_size_video or end_byte == size_file): 
                     buffer_ = sorted(buffer_, key = lambda x: x['i']) 
-                    
-                    #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
+
+                    # print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                     
                     for i in buffer_:
-                        mpv_process.stdin.write(i['data'])
-                        mpv_process.stdin.flush()
+                        vlc_process.stdin.write(i['data'])
+                        vlc_process.stdin.flush()
                     
                     buffer_ = []
                     bytes_recebidos = 0
@@ -122,12 +120,12 @@ class ClientTCP:
   
                 #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                 start_byte = end_byte
-                if end_byte + 1464 < size_file:
-                    end_byte += 1464
+                if end_byte + self.BUFFER_SIZE < size_file:
+                    end_byte += self.BUFFER_SIZE
                 else:
                     end_byte = size_file
 
-            mpv_process.terminate() 
+            vlc_process.terminate() 
 
         except Exception as e:
             print(f"[!] Error receiving data: {e}")
@@ -142,6 +140,10 @@ class ClientTCP:
         while True:
             try:
                 entry = int(input())
+                if entry == 1:
+                    print("Seu vídeo será pausado em instantes")
+                if entry == 2:
+                    print("Seu vídeo será reproduzido em instantes")
             except:
                 pass
             if entry > 0 and entry < 6:

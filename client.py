@@ -7,12 +7,12 @@ import subprocess
 import time
 
 class ClientTCP:
-    def __init__(self, host='192.168.0.112', udp_port=12345, control_port=12346):
-        self.BUFFER_SIZE = 1464
-        self.SLEEP_TIME = 0.5
+    def __init__(self, host='192.168.0.102', udp_port=12345, control_port=12346):
+        self.BUFFER_SIZE = 1464 * 3
+        self.TEMPO_ESPERA = 0.2
 
         #UDP troca de dados
-        self.udp_server_address = (host, udp_port)
+        self.endereco_servidor_udp = (host, udp_port)
         self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, self.BUFFER_SIZE)
 
@@ -27,7 +27,7 @@ class ClientTCP:
         self.msg_control = {"d":(0,self.BUFFER_SIZE),"c":"Play"}
 
         try:
-            self.udp.sendto(b"UDP Connection Request", self.udp_server_address)
+            self.udp.sendto(b"UDP Connection Request", self.endereco_servidor_udp)
             print(f"[+] Connected to {host}:{udp_port} UDP")
 
             self.control_tcp.connect((host, control_port))
@@ -48,26 +48,27 @@ class ClientTCP:
         try:
             print("[-] Receiving file via TCP...")
 
-            buffer_size_video = int(bit_rate) * 2
-            print(f"[*] Buffer size: {buffer_size_video}")
-            vlc_path = r"C:\Program Files\VideoLAN\VLC\vlc.exe"
+            tamanho_buffer_video = int(bit_rate) * 1/2
+            print(f"[*] Tamanho do buffer: {tamanho_buffer_video}")
 
             devnull = open(os.devnull, 'w')
-            vlc_process = subprocess.Popen([vlc_path, '-', '--input-title-format', 'Streaming Video',
-                                    '--network-caching=0', '--file-caching=0'],
-                                    stdin=subprocess.PIPE)
+            mpv_process = subprocess.Popen(
+                ['mpv', '-cache=no', '--demuxer-thread=no','--no-terminal', '-'],
+                stdin=subprocess.PIPE,
+                stderr=devnull
+            )
 
             #Iniciar a thread de controle do vídeo
             thread = threading.Thread(target=self.handle_input)
             thread.daemon = True  #Tornar a thread daemon para que ela não bloqueie a saída
             thread.start()
 
-            end_byte = self.BUFFER_SIZE
+            end_byte = 1464 * 3
             start_byte = 0
 
             buffer_ = []
             bytes_recebidos = 0
-            first_run = True
+
             while True:
                 start_time = time.time()
                 while True:
@@ -97,18 +98,19 @@ class ClientTCP:
                 bytes_recebidos += len(data_response['data'])
                 buffer_.append(data_response)
 
-                if (bytes_recebidos >= buffer_size_video or end_byte == size_file): 
+                #print(f"Bytes Recebidos: {bytes_recebidos} tam buffer: {len(buffer_)}", end = '\n')
+                if bytes_recebidos >= tamanho_buffer_video or end_byte == size_file: 
                     buffer_ = sorted(buffer_, key = lambda x: x['i']) 
-
-                    # print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
+                    
+                    #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                     
                     for i in buffer_:
-                        vlc_process.stdin.write(i['data'])
-                        vlc_process.stdin.flush()
+                        mpv_process.stdin.write(i['data'])
+                        mpv_process.stdin.flush()
                     
                     buffer_ = []
                     bytes_recebidos = 0
-                    time.sleep(self.SLEEP_TIME)
+                    time.sleep(self.TEMPO_ESPERA)
 
                 if end_byte == size_file:
                     print("[*] Video streaming to mpv finished.")
@@ -120,12 +122,12 @@ class ClientTCP:
   
                 #print(f"[#] Progress ({end_byte* 100 /size_file:.2f}%): {end_byte} de {size_file}", end='\r')
                 start_byte = end_byte
-                if end_byte + self.BUFFER_SIZE < size_file:
-                    end_byte += self.BUFFER_SIZE
+                if end_byte + 1464 < size_file:
+                    end_byte += 1464
                 else:
                     end_byte = size_file
 
-            vlc_process.terminate() 
+            mpv_process.terminate() 
 
         except Exception as e:
             print(f"[!] Error receiving data: {e}")
@@ -140,16 +142,12 @@ class ClientTCP:
         while True:
             try:
                 entry = int(input())
-                if entry == 1:
-                    print("Seu vídeo será pausado em instantes")
-                if entry == 2:
-                    print("Seu vídeo será reproduzido em instantes")
             except:
                 pass
             if entry > 0 and entry < 6:
                 self.msg_control['c'] = comand[entry -1]
 
-    def run(self):
+    def run(self,id_file):
         if not self.control_tcp:
             print("[!] Connection not established. Exiting.")
             return
@@ -162,37 +160,33 @@ class ClientTCP:
             print(f"\t[>] TCP Response: {data}")
 
             # Solicitar o arquivo ao servidor via TCP
-            msg = f"{threading.current_thread().name} TCP true"
+            msg = f"{threading.current_thread().name} {id_file}"
+
             self.control_tcp.sendall(msg.encode())
             print(f"\t[<] TCP Request: {msg}")
 
             # Receber o arquivo do servidor via UDP
-            self.receive_file(data['size_file'], data['bit_rate'])
+            print(data['size'], data['bit_rate'])
+            self.receive_file(data['size'], data['bit_rate'])
             
         except Exception as e:
             print(f"[!] Error during communication: {e}")
         finally:
-            # if self.tcp:
-            #     try:
-            #         print(f"[*] Closing TCP connection to {self.tcp.getpeername()}")
-            #     except Exception as e:
-            #         print(f"[!] Error accessing TCP socket info: {e}")
-            #     self.tcp.close()
-            
-            #if self.control_tcp:
-                #try:
-                    #print(f"[*] Closing TCP connection to {self.control_tcp.getpeername()}")
-                #except Exception as e:
-                    #print(f"[!] Error accessing TCP socket info: {e}")
-                #self.control_tcp.close()
-            pass
+            self.control_tcp.close()
+            self.udp.close()
+            exit(0)
 
 if __name__ == '__main__':
+    print("========================================")
+    print(" 1- 30s        2- 21m:32s         3- 12s")     
+    print("========================================")
+    index = int(input("Escolha o video: "))
+
     num_clients = 1  # Número de clientes que você quer abrir
 
     threads = []
     for i in range(num_clients):
-        thread = threading.Thread(target=ClientTCP().run, name=f"ClientThread-{i+1}")
+        thread = threading.Thread(target=ClientTCP().run, name=f"ClientThread-{i+1}", args=(index,))
         thread.start()
         threads.append(thread)
 
